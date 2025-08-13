@@ -6,11 +6,12 @@ from pyrogram import Client
 from playwright.async_api import async_playwright
 import portalsmp as pm
 
-# --- Конфиг из переменных окружения ---
+# --- Конфиг через переменные окружения ---
 SESSION_STRING = os.environ["SESSION_STRING"]
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
 CHANNEL = os.environ["CHANNEL"]
+
 MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 200))
 MAX_GIFTS = int(os.environ.get("MAX_GIFTS", 5000))
@@ -20,10 +21,9 @@ CHECK_INTERVAL = (
 )
 FRESH_SEC = int(os.environ.get("FRESH_SEC", 60))
 
-# --- Множество уже обработанных подарков ---
 seen_ids = set()
 
-# --- Playwright для обхода защиты ---
+# --- Playwright обход Cloudflare ---
 async def bypass_cf():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -50,11 +50,9 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
         gid = g.get("id") or g.get("token_id")
         if not gid or gid in seen:
             continue
-
         listed_at = g.get("listed_at")
         if not listed_at:
             continue
-
         listed_ts = None
         try:
             if isinstance(listed_at, (int, float)):
@@ -66,34 +64,34 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
                     listed_ts = float(listed_at)
         except:
             continue
-
         if not listed_ts or now - listed_ts > fresh_sec:
             continue
-
         try:
             price = float(str(g.get("price", 0)).replace("~","").strip())
             floor = float(str(g.get("floor_price", 0)).replace("~","").strip())
         except:
             continue
-
         drop_percent = 100 * (1 - price / floor) if floor > 0 else 0
         if drop_percent >= min_drop:
             g['drop_percent'] = round(drop_percent,1)
             out.append(g)
             seen.add(gid)
-
     print(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
     return out
 
-# --- Основной async цикл мониторинга ---
+# --- Основной async цикл ---
 async def monitor_loop():
-    async with Client(session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH) as app:
+    async with Client(
+        name="my_account",
+        session_string=SESSION_STRING,
+        api_id=API_ID,
+        api_hash=API_HASH
+    ) as app:
         while True:
             try:
                 await bypass_cf()
                 token = await pm.update_auth(API_ID, API_HASH)
 
-                # Постраничный сбор
                 all_gifts = []
                 for offset in range(0, MAX_GIFTS, BATCH_SIZE):
                     batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
@@ -104,10 +102,8 @@ async def monitor_loop():
                 if all_gifts:
                     print(all_gifts[:3])
 
-                # Фильтрация свежих листингов
                 filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
 
-                # Публикация в канал
                 for g in filtered:
                     msg = (
                         f"🎁 <b>{g.get('name','Unknown')}</b>\n"
