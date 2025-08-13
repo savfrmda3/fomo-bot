@@ -6,11 +6,11 @@ from pyrogram import Client
 from playwright.async_api import async_playwright
 import portalsmp as pm
 
-# --- Конфиг через переменные окружения Railway ---
-SESSION_STRING = os.environ["SESSION_STRING"]
-API_ID = int(os.environ["API_ID"])
-API_HASH = os.environ["API_HASH"]
-CHANNEL = os.environ["CHANNEL"]
+# --- Настройки через переменные окружения Railway ---
+SESSION_STRING = os.environ.get("SESSION_STRING")
+API_ID = int(os.environ.get("API_ID", 0))
+API_HASH = os.environ.get("API_HASH")
+CHANNEL = os.environ.get("CHANNEL")
 
 MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 200))
@@ -22,6 +22,9 @@ CHECK_INTERVAL = (
 FRESH_SEC = int(os.environ.get("FRESH_SEC", 60))
 
 seen_ids = set()
+
+# --- Игнорируем проверки хоста Playwright на Railway ---
+os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
 # --- Playwright обход Cloudflare ---
 async def bypass_cf():
@@ -79,7 +82,7 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
     print(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
     return out
 
-# --- Основной async цикл ---
+# --- Основной цикл мониторинга ---
 async def monitor_loop():
     async with Client(
         name="my_account",
@@ -99,8 +102,6 @@ async def monitor_loop():
                         break
                     all_gifts.extend(batch)
                 print(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
-                if all_gifts:
-                    print(all_gifts[:3])
 
                 filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
 
