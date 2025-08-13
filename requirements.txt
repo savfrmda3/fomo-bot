@@ -1,0 +1,4 @@
+pyrogram==2.0.45
+portalsmp
+playwright
+python-dotenv
