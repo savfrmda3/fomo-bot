@@ -5,19 +5,20 @@ import os
 from pyrogram import Client
 from playwright.async_api import async_playwright
 import portalsmp as pm
-from dotenv import load_dotenv
 
-# --- Загрузка переменных окружения ---
-load_dotenv()
-API_ID = int(os.getenv("API_ID"))
-API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL = os.getenv("CHANNEL")
-MIN_DROP_PERCENT = int(os.getenv("MIN_DROP_PERCENT", 10))
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", 200))
-MAX_GIFTS = int(os.getenv("MAX_GIFTS", 5000))
-CHECK_INTERVAL = (int(os.getenv("CHECK_MIN", 60)), int(os.getenv("CHECK_MAX", 120)))
-FRESH_SEC = int(os.getenv("FRESH_SEC", 60))
+# --- Конфиг из переменных окружения ---
+API_ID = int(os.environ["API_ID"])
+API_HASH = os.environ["API_HASH"]
+BOT_TOKEN = os.environ["BOT_TOKEN"]
+CHANNEL = os.environ["CHANNEL"]
+MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 200))
+MAX_GIFTS = int(os.environ.get("MAX_GIFTS", 5000))
+CHECK_INTERVAL = (
+    int(os.environ.get("CHECK_MIN", 60)),
+    int(os.environ.get("CHECK_MAX", 120))
+)
+FRESH_SEC = int(os.environ.get("FRESH_SEC", 60))
 
 # --- Множество уже обработанных подарков ---
 seen_ids = set()
