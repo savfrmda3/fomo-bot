@@ -7,9 +7,9 @@ from playwright.async_api import async_playwright
 import portalsmp as pm
 
 # --- Конфиг из переменных окружения ---
+SESSION_STRING = os.environ["SESSION_STRING"]
 API_ID = int(os.environ["API_ID"])
 API_HASH = os.environ["API_HASH"]
-BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHANNEL = os.environ["CHANNEL"]
 MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 200))
@@ -42,7 +42,7 @@ async def bypass_cf():
         await browser.close()
         print("[CF] Bypass done")
 
-# --- Универсальный фильтр свежих листингов ---
+# --- Фильтр свежих листингов ---
 def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
     out = []
     now = time.time()
@@ -87,27 +87,27 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
 
 # --- Основной async цикл мониторинга ---
 async def monitor_loop():
-    while True:
-        try:
-            await bypass_cf()
-            token = await pm.update_auth(API_ID, API_HASH)
+    async with Client(session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH) as app:
+        while True:
+            try:
+                await bypass_cf()
+                token = await pm.update_auth(API_ID, API_HASH)
 
-            # Постраничный сбор
-            all_gifts = []
-            for offset in range(0, MAX_GIFTS, BATCH_SIZE):
-                batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
-                if not batch:
-                    break
-                all_gifts.extend(batch)
-            print(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
-            if all_gifts:
-                print(all_gifts[:3])  # первые 3 для проверки формата
+                # Постраничный сбор
+                all_gifts = []
+                for offset in range(0, MAX_GIFTS, BATCH_SIZE):
+                    batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+                    if not batch:
+                        break
+                    all_gifts.extend(batch)
+                print(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
+                if all_gifts:
+                    print(all_gifts[:3])
 
-            # Фильтрация свежих листингов
-            filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
+                # Фильтрация свежих листингов
+                filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
 
-            # Публикация в канал
-            async with Client("fomo_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN) as app:
+                # Публикация в канал
                 for g in filtered:
                     msg = (
                         f"🎁 <b>{g.get('name','Unknown')}</b>\n"
@@ -121,13 +121,13 @@ async def monitor_loop():
                     print(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
                     await asyncio.sleep(random.uniform(0.5, 1.3))
 
-            interval = random.randint(*CHECK_INTERVAL)
-            print(f"[WAIT] Next check in {interval} seconds...")
-            await asyncio.sleep(interval)
+                interval = random.randint(*CHECK_INTERVAL)
+                print(f"[WAIT] Next check in {interval} seconds...")
+                await asyncio.sleep(interval)
 
-        except Exception as e:
-            print(f"[ERROR] {e}, retrying in 30 sec...")
-            await asyncio.sleep(30)
+            except Exception as e:
+                print(f"[ERROR] {e}, retrying in 30 sec...")
+                await asyncio.sleep(30)
 
 # --- Запуск ---
 if __name__ == "__main__":
