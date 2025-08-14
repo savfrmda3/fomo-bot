@@ -8,7 +8,7 @@ import portalsmp as pm
 
 # --- Переменные окружения Railway ---
 SESSION_STRING = os.environ.get("SESSION_STRING")
-API_ID = os.environ.get("API_ID")
+API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH")
 CHANNEL = os.environ.get("CHANNEL")
 
