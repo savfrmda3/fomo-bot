@@ -1,5 +1,7 @@
-pyrogram==2.0.45
-portalsmp
-playwright
-python-dotenv
-tgcrypto
+pyrogram==2.0.55
+tgcrypto==1.4.4
+playwright==1.43.0
+python-dotenv==1.0.0
+requests==2.31.0
+beautifulsoup4==4.13.0
+lxml==4.9.3
