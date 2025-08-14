@@ -3,3 +3,4 @@ portalsmp
 playwright
 python-dotenv
 tgcrypto
+logging
