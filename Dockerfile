@@ -1,6 +1,6 @@
-FROM python:3.12-slim
+FROM python:3.12
 
-# --- Системные зависимости для сборки Python пакетов и Chromium ---
+# --- Системные зависимости для Playwright и Python пакетов ---
 RUN apt-get update && apt-get install -y \
     build-essential \
     python3-dev \
@@ -23,13 +23,19 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     fonts-liberation \
     unzip \
+    libxml2-dev \
+    libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# --- Копируем и устанавливаем зависимости ---
+# --- Копируем зависимости ---
 COPY requirements.txt ./
+
+# --- Обновляем pip, setuptools, wheel ---
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# --- Ставим Python-зависимости ---
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Устанавливаем Playwright и Chromium ---
