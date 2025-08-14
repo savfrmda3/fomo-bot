@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcups2 \
     wget \
     gnupg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Set working directory ---
@@ -29,13 +30,15 @@ WORKDIR /app
 
 # --- Copy requirements and install Python deps ---
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir playwright
 
-# --- Install Playwright browsers (Chromium only) ---
-RUN playwright install --with-deps chromium
+# --- Install Playwright Chromium ---
+RUN playwright install chromium
 
 # --- Copy the rest of the application ---
 COPY . .
 
-# --- Run the bot ---
+# --- Default command ---
 CMD ["python", "main.py"]
