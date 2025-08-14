@@ -2,9 +2,10 @@ import asyncio
 import random
 import time
 import os
-from pyrogram import Client, StringSession
+from pyrogram import Client
+from pyrogram.session import StringSession
 from playwright.async_api import async_playwright
-import portalsmp as pm
+import portalsmp as pm  # убедись, что portalsmp установлен
 
 # --- Настройки через переменные окружения Railway ---
 SESSION_STRING = os.environ.get("SESSION_STRING")
