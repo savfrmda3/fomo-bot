@@ -2,8 +2,7 @@ import asyncio
 import random
 import time
 import os
-from pyrogram import Client
-from pyrogram.sessions import StringSession
+from pyrogram import Client, StringSession
 from playwright.async_api import async_playwright
 import portalsmp as pm
 
