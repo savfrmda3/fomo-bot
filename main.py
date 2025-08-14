@@ -47,7 +47,7 @@ def make_client():
 
 async def bypass_cf():
     async with async_playwright() as p:
-        browser = await p.firefox.launch(headless=True)
+        browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(user_agent=(
             "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20A5346a TelegramBot/8.0"
