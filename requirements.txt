@@ -1,7 +1,5 @@
 pyrogram==2.0.55
-tgcrypto==1.2.5
 playwright-core==1.43.0
 python-dotenv==1.0.0
 requests==2.31.0
-beautifulsoup4==4.13.0
-lxml==4.9.3
+tgcrypto==1.2.5
