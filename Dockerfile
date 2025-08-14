@@ -1,49 +1,41 @@
-# --- Используем официальный Python 3.11 ---
+# --- Base Python image ---
 FROM python:3.11-slim
 
-# --- Устанавливаем зависимости для Chromium ---
-RUN apt-get update && apt-get install -y \
-    libglib2.0-0 \
+# --- Prevent Python from writing pyc files, force stdout flushing ---
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# --- Install system dependencies for Playwright & Chromium ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 \
-    libnspr4 \
-    libdbus-1-3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
-    libatspi2.0-0 \
-    libx11-6 \
+    libdrm2 \
+    libxkbcommon0 \
     libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
     libxrandr2 \
     libgbm1 \
-    libxcb1 \
-    libxkbcommon0 \
     libasound2 \
+    libpangocairo-1.0-0 \
+    libxdamage1 \
+    libpango-1.0-0 \
+    libcups2 \
     wget \
-    curl \
-    ca-certificates \
-    fonts-liberation \
-    lsb-release \
-    xdg-utils \
+    gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Устанавливаем зависимости Python ---
+# --- Set working directory ---
 WORKDIR /app
+
+# --- Copy requirements and install Python deps ---
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# --- Устанавливаем Playwright Browsers ---
-RUN playwright install chromium
+# --- Install Playwright browsers (Chromium only) ---
+RUN playwright install --with-deps chromium
 
-# --- Копируем код бота ---
+# --- Copy the rest of the application ---
 COPY . .
 
-# --- Указываем переменные окружения Railway (или можно задать в Railway UI) ---
-# ENV SESSION_STRING=твой_session_string
-# ENV API_ID=123456
-# ENV API_HASH=your_api_hash
-# ENV CHANNEL=@твoй_канал
-
-# --- Команда запуска бота ---
+# --- Run the bot ---
 CMD ["python", "main.py"]
