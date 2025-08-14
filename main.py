@@ -2,38 +2,28 @@ import asyncio
 import random
 import time
 import os
-import sys
 from pyrogram import Client
 from playwright.async_api import async_playwright
 import portalsmp as pm
 
-# --- Загрузка и проверка переменных окружения ---
-def get_env_var(name, default=None, cast=str):
-    val = os.environ.get(name, default)
-    if val is None:
-        sys.exit(f"[ERROR] Переменная окружения {name} не задана!")
-    return cast(val) if cast else val
+# --- Переменные окружения Railway ---
+SESSION_STRING = os.environ.get("SESSION_STRING")
+API_ID = int(os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
+CHANNEL = os.environ.get("CHANNEL")
 
-SESSION_STRING = os.environ.get("SESSION_STRING", "").replace("\n", "").strip()
-if not SESSION_STRING:
-    sys.exit("[ERROR] SESSION_STRING пустой или некорректный — проверь переменные Railway!")
-
-API_ID = get_env_var("API_ID", cast=int)
-API_HASH = get_env_var("API_HASH")
-CHANNEL = get_env_var("CHANNEL")
-
-MIN_DROP_PERCENT = get_env_var("MIN_DROP_PERCENT", 10, int)
-BATCH_SIZE = get_env_var("BATCH_SIZE", 200, int)
-MAX_GIFTS = get_env_var("MAX_GIFTS", 5000, int)
+MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
+BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 200))
+MAX_GIFTS = int(os.environ.get("MAX_GIFTS", 5000))
 CHECK_INTERVAL = (
-    get_env_var("CHECK_MIN", 60, int),
-    get_env_var("CHECK_MAX", 120, int)
+    int(os.environ.get("CHECK_MIN", 60)),
+    int(os.environ.get("CHECK_MAX", 120))
 )
-FRESH_SEC = get_env_var("FRESH_SEC", 60, int)
+FRESH_SEC = int(os.environ.get("FRESH_SEC", 60))
 
 seen_ids = set()
 
-# --- Игнорируем проверки хоста Playwright на Railway ---
+# --- Игнорируем проверки Playwright на Railway ---
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
 # --- Playwright обход Cloudflare ---
@@ -80,13 +70,13 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
         if not listed_ts or now - listed_ts > fresh_sec:
             continue
         try:
-            price = float(str(g.get("price", 0)).replace("~", "").strip())
-            floor = float(str(g.get("floor_price", 0)).replace("~", "").strip())
+            price = float(str(g.get("price", 0)).replace("~","").strip())
+            floor = float(str(g.get("floor_price", 0)).replace("~","").strip())
         except:
             continue
         drop_percent = 100 * (1 - price / floor) if floor > 0 else 0
         if drop_percent >= min_drop:
-            g['drop_percent'] = round(drop_percent, 1)
+            g['drop_percent'] = round(drop_percent,1)
             out.append(g)
             seen.add(gid)
     print(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
@@ -100,9 +90,7 @@ async def monitor_loop():
         api_id=API_ID,
         api_hash=API_HASH
     ) as app:
-        me = await app.get_me()
-        print(f"[START] Авторизован как: {me.first_name} (id: {me.id})")
-
+        print("[INFO] Session started successfully")
         while True:
             try:
                 await bypass_cf()
