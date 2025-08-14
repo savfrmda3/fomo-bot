@@ -3,10 +3,11 @@ import random
 import time
 import os
 from pyrogram import Client
+from pyrogram.sessions import StringSession
 from playwright.async_api import async_playwright
 import portalsmp as pm
 
-# --- Переменные окружения Railway ---
+# --- Настройки через переменные окружения Railway ---
 SESSION_STRING = os.environ.get("SESSION_STRING")
 API_ID = int(os.environ.get("API_ID", 0))
 API_HASH = os.environ.get("API_HASH")
@@ -23,7 +24,7 @@ FRESH_SEC = int(os.environ.get("FRESH_SEC", 60))
 
 seen_ids = set()
 
-# --- Игнорируем проверки Playwright на Railway ---
+# --- Игнорируем проверки хоста Playwright на Railway ---
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
 # --- Playwright обход Cloudflare ---
@@ -85,12 +86,11 @@ def filter_fresh_gifts(items: list, min_drop: float, seen: set, fresh_sec=60):
 # --- Основной цикл мониторинга ---
 async def monitor_loop():
     async with Client(
-        name="my_account",
-        session_string=SESSION_STRING,
+        StringSession(SESSION_STRING),
         api_id=API_ID,
-        api_hash=API_HASH
+        api_hash=API_HASH,
+        name="my_account"
     ) as app:
-        print("[INFO] Session started successfully")
         while True:
             try:
                 await bypass_cf()
