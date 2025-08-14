@@ -1,7 +1,6 @@
 import asyncio
 import random
 import time
-import tgcypto
 import os
 from pyrogram import Client
 from playwright.async_api import async_playwright
