@@ -1,11 +1,10 @@
-# Используем свежий Python 3.11
 FROM python:3.11-slim
 
-# Устанавливаем зависимости для Playwright/браузеров
+# Устанавливаем базовые зависимости для chromium
 RUN apt-get update && apt-get install -y \
+    wget \
     curl \
     unzip \
-    wget \
     gnupg \
     libnss3 \
     libx11-xcb1 \
@@ -26,22 +25,18 @@ RUN apt-get update && apt-get install -y \
     libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаем рабочую директорию
 WORKDIR /app
 
-# Сначала копируем только requirements.txt (чтобы кэшировать слои)
+# Копируем requirements.txt отдельно (чтобы кешировать)
 COPY requirements.txt ./
-
-# Обновляем pip и ставим зависимости
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь проект
+# Копируем проект
 COPY . .
 
-# Устанавливаем playwright и chromium
+# Ставим playwright и chromium
 RUN pip install playwright
-RUN playwright install --with-deps chromium
+RUN playwright install chromium
 
-# Запускаем main.py
 CMD ["python", "main.py"]
