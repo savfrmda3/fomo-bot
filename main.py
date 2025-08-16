@@ -9,8 +9,8 @@ from playwright.async_api import async_playwright
 import portalsmp as pm
 
 # --- ENV ---
-SESSION_STRING = (os.environ.get("SESSION_STRING") or "").strip()
-BOT_TOKEN      = (os.environ.get("BOT_TOKEN") or "").strip()
+SESSION_STRING = os.environ.get("SESSION_STRING", "").strip()
+BOT_TOKEN      = os.environ.get("BOT_TOKEN", "").strip()
 API_ID         = int(os.environ["API_ID"])
 API_HASH       = os.environ["API_HASH"]
 CHANNEL        = os.environ["CHANNEL"]
@@ -21,29 +21,28 @@ MAX_GIFTS        = int(os.environ.get("MAX_GIFTS", 5000))
 CHECK_INTERVAL   = (int(os.environ.get("CHECK_MIN", 60)), int(os.environ.get("CHECK_MAX", 120)))
 FRESH_SEC        = int(os.environ.get("FRESH_SEC", 60))
 
-# Playwright deps на Railway
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
 seen_ids = set()
 
-def make_client():
-    # Используем user-сессию только если она похожа на валидную строку
-    if SESSION_STRING and len(SESSION_STRING) > 100 and SESSION_STRING.startswith(("BA", "CA", "DA")):
+def make_client(use_bot=False):
+    """Создаёт Pyrogram client: юзербот или BOT_TOKEN"""
+    if not use_bot and SESSION_STRING and len(SESSION_STRING) > 100 and SESSION_STRING.startswith(("BA", "CA", "DA")):
         return Client(
             name="user_session",
             api_id=API_ID,
             api_hash=API_HASH,
             session_string=SESSION_STRING
         )
-    # Фолбэк на бота (никаких телефонов)
-    if BOT_TOKEN:
+    elif BOT_TOKEN:
         return Client(
             name="bot_session",
             api_id=API_ID,
             api_hash=API_HASH,
             bot_token=BOT_TOKEN
         )
-    raise RuntimeError("Нет ни SESSION_STRING, ни BOT_TOKEN")
+    else:
+        raise RuntimeError("Нет ни SESSION_STRING, ни BOT_TOKEN")
 
 async def bypass_cf():
     async with async_playwright() as p:
@@ -70,6 +69,7 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
         listed_at = g.get("listed_at")
         if not listed_at:
             continue
+        listed_ts = None
         try:
             listed_ts = float(listed_at)
         except:
@@ -77,11 +77,11 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
                 listed_ts = time.mktime(time.strptime(str(listed_at).split(".")[0], "%Y-%m-%dT%H:%M:%S"))
             except:
                 continue
-        if now - listed_ts > fresh_sec:
+        if listed_ts is None or now - listed_ts > fresh_sec:
             continue
         try:
             price = float(str(g.get("price", 0)).replace("~", "").strip())
-            floor  = float(str(g.get("floor_price", 0)).replace("~", "").strip())
+            floor = float(str(g.get("floor_price", 0)).replace("~", "").strip())
         except:
             continue
         drop_percent = 100 * (1 - price / floor) if floor > 0 else 0
@@ -95,7 +95,6 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
 async def one_cycle(app):
     await bypass_cf()
     token = await pm.update_auth(API_ID, API_HASH)
-
     all_gifts = []
     for offset in range(0, MAX_GIFTS, BATCH_SIZE):
         batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
@@ -103,7 +102,6 @@ async def one_cycle(app):
             break
         all_gifts.extend(batch)
     print(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
-
     filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
     for g in filtered:
         msg = (
@@ -114,13 +112,17 @@ async def one_cycle(app):
             f"🌑 BG: {g.get('backdrop')}\n"
             f"🔗 <a href='{g.get('photo_url','')}'>Open</a>"
         )
-        await app.send_message(CHANNEL, msg, disable_web_page_preview=False)
-        print(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
+        try:
+            await app.send_message(CHANNEL, msg, disable_web_page_preview=False)
+            print(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
+        except Exception as e:
+            print(f"[SEND ERROR] {e}")
         await asyncio.sleep(random.uniform(0.5, 1.3))
 
 async def monitor_loop():
+    use_bot = False
     while True:
-        cli = make_client()
+        cli = make_client(use_bot=use_bot)
         try:
             async with cli as app:
                 me = await app.get_me()
@@ -130,12 +132,10 @@ async def monitor_loop():
                 print(f"[WAIT] Next check in {interval} sec...")
                 await asyncio.sleep(interval)
         except Unauthorized as e:
-            print(f"[AUTH] {e}. User session недействительна. Переключаюсь на BOT_TOKEN (если задан).")
-            # Обнуляем SESSION_STRING, чтобы далее make_client выбрал бота
-            global SESSION_STRING
-            SESSION_STRING = ""
+            print(f"[AUTH] {e}. Switching to BOT_TOKEN if available.")
             if not BOT_TOKEN:
                 raise
+            use_bot = True  # далее используем бота
             await asyncio.sleep(5)
         except Exception as e:
             print(f"[ERROR] {e}, retrying in 30 sec...")
