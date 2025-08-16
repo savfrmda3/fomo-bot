@@ -1,6 +1,16 @@
+# --- Telegram ---
 pyrogram==2.0.106
 tgcrypto==1.2.5
+
+# --- Парсинг WebApp / Playwright ---
 playwright==1.43.0
-python-dotenv==1.0.0
+curl-cffi==0.6.2
 requests==2.31.0
 beautifulsoup4==4.12.3
+lxml==5.2.1
+fake-useragent==1.5.1
+
+# --- Система логов / утилиты ---
+python-dotenv==1.0.0
+pydantic==2.7.1
+loguru==0.7.2
