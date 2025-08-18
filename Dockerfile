@@ -46,7 +46,8 @@ COPY . .
 
 # --- Переменные окружения ---
 ENV PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1
-ENV PYTHONUNBUFFERED=1  # Для unbuffered output в логи
+# Для unbuffered output в логи
+ENV PYTHONUNBUFFERED=1
 
 # --- Запуск приложения ---
 CMD ["python", "main.py"]
