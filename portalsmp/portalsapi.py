@@ -25,18 +25,19 @@ def activityListToURL(activity: list) -> str:
 def toShortName(gift_name):
     return gift_name.replace(" ", "").replace("'", "").replace("’", "").replace("-", "").lower()
 
-async def update_auth(api_id: int|str, api_hash: str) -> str:
+async def update_auth(api_id: int|str, api_hash: str, session_string: str | None = None) -> str:
     """
     Updates Telegram authData for Portals API using Pyrogram.
 
     Args:
         api_id (int|str)
         api_hash (str)
+        session_string (str | None): Optional session string to avoid interactive login.
 
     Returns:
         str: new authData
     """
-    async with Client("account", api_id=api_id, api_hash=api_hash) as client:
+    async with Client("account", api_id=api_id, api_hash=api_hash, session_string=session_string) as client:
         peer = await client.resolve_peer("portals")
         user_full = await client.invoke(GetUsers(id=[peer]))
         bot_raw = user_full[0]
