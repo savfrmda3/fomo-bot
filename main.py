@@ -8,9 +8,8 @@ import logging
 from pyrogram import Client
 from pyrogram.errors import Unauthorized
 from playwright.async_api import async_playwright
-import portalsmp as pm
 
-# --- Logging ---
+# --- Настройка logging ---
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 # --- ENV ---
@@ -21,14 +20,12 @@ API_HASH       = os.environ["API_HASH"]
 CHANNEL        = os.environ["CHANNEL"]
 
 MIN_DROP_PERCENT = int(os.environ.get("MIN_DROP_PERCENT", 10))
-BATCH_SIZE       = int(os.environ.get("BATCH_SIZE", 200))
-MAX_GIFTS        = int(os.environ.get("MAX_GIFTS", 5000))
-CHECK_INTERVAL   = (int(os.environ.get("CHECK_MIN", 60)), int(os.environ.get("CHECK_MAX", 120)))
 FRESH_SEC        = int(os.environ.get("FRESH_SEC", 60))
+CHECK_INTERVAL   = (int(os.environ.get("CHECK_MIN", 60)), int(os.environ.get("CHECK_MAX", 120)))
 
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
-# --- Seen IDs ---
+# --- Персистентность seen_ids ---
 SEEN_FILE = 'seen_ids.pickle'
 seen_ids = set()
 if os.path.exists(SEEN_FILE):
@@ -39,9 +36,9 @@ def save_seen_ids():
     with open(SEEN_FILE, 'wb') as f:
         pickle.dump(seen_ids, f)
 
-# --- Telegram Client ---
 def make_client(use_bot=False):
-    if not use_bot and SESSION_STRING and len(SESSION_STRING) > 100 and SESSION_STRING.startswith(("BA","CA","DA")):
+    """Создаёт Pyrogram client: юзербот или BOT_TOKEN"""
+    if not use_bot and SESSION_STRING and len(SESSION_STRING) > 100:
         return Client(
             name="user_session",
             api_id=API_ID,
@@ -58,8 +55,8 @@ def make_client(use_bot=False):
     else:
         raise RuntimeError("Нет ни SESSION_STRING, ни BOT_TOKEN")
 
-# --- Cloudflare bypass ---
 async def bypass_cf():
+    """Эмуляция человека для обхода Cloudflare"""
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context(user_agent=(
@@ -75,7 +72,6 @@ async def bypass_cf():
         await browser.close()
         logging.info("[CF] Bypass done")
 
-# --- Filter fresh gifts ---
 def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
     out, now = [], time.time()
     for g in items:
@@ -91,40 +87,57 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
             try:
                 listed_ts = time.mktime(time.strptime(str(listed_at).split(".")[0], "%Y-%m-%dT%H:%M:%S"))
             except ValueError:
-                logging.warning(f"[FILTER] Invalid listed_at: {listed_at}")
                 continue
         if now - listed_ts > fresh_sec:
             continue
         try:
-            price = float(str(g.get("price",0)).replace("~","").strip())
-            floor = float(str(g.get("floor_price",0)).replace("~","").strip())
+            price = float(str(g.get("price", 0)).replace("~", "").strip())
+            floor = float(str(g.get("floor_price", 0)).replace("~", "").strip())
         except ValueError:
-            logging.warning(f"[FILTER] Invalid price/floor: {g.get('price')} / {g.get('floor_price')}")
             continue
-        drop_percent = 100*(1-price/floor) if floor>0 else 0
+        drop_percent = 100 * (1 - price / floor) if floor > 0 else 0
         if drop_percent >= min_drop:
-            g["drop_percent"] = round(drop_percent,1)
+            g["drop_percent"] = round(drop_percent, 1)
             out.append(g)
             seen.add(gid)
     logging.info(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
     return out
 
-# --- One monitoring cycle ---
+async def collect_activity_gifts():
+    """Собираем подарки с activity через Playwright XHR"""
+    gifts = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        ctx = await browser.new_context(user_agent=(
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20A5346a TelegramBot/8.0"
+        ))
+        page = await ctx.new_page()
+
+        # Ловим XHR запросы с activity
+        async def handle_response(resp):
+            url = resp.url
+            if "activity" in url or "listing" in url:
+                try:
+                    data = await resp.json()
+                    items = data.get("items") or data.get("gifts") or []
+                    gifts.extend(items)
+                except:
+                    pass
+
+        page.on("response", handle_response)
+
+        await page.goto("https://portals-market.com/activity", wait_until="domcontentloaded")
+        await asyncio.sleep(5)  # ждем загрузки XHR
+        await browser.close()
+    logging.info(f"[PLAYWRIGHT XHR] Collected {len(gifts)} gifts total")
+    return gifts
+
 async def one_cycle(app):
     await bypass_cf()
-    token = await pm.update_auth(API_ID, API_HASH, SESSION_STRING)
-    all_gifts = []
-    for offset in range(0, MAX_GIFTS, BATCH_SIZE):
-        try:
-            batch = pm.marketActivity(authData=token, limit=BATCH_SIZE, offset=offset)
-            if not batch:
-                break
-            all_gifts.extend(batch)
-        except Exception as e:
-            logging.error(f"[SEARCH ERROR] at offset {offset}: {e}")
-            break
-    logging.info(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
-    filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
+    gifts = await collect_activity_gifts()
+    filtered = filter_fresh_gifts(gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
+
     for g in filtered:
         msg = (
             f"🎁 <b>{g.get('name','Unknown')}</b>\n"
@@ -139,10 +152,10 @@ async def one_cycle(app):
             logging.info(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
         except Exception as e:
             logging.error(f"[SEND ERROR] {e}")
-        await asyncio.sleep(random.uniform(0.5,1.3))
+        await asyncio.sleep(random.uniform(0.5, 1.3))
+
     save_seen_ids()
 
-# --- Monitoring loop ---
 async def monitor_loop():
     use_bot = False
     while True:
@@ -150,7 +163,7 @@ async def monitor_loop():
         try:
             async with cli as app:
                 me = await app.get_me()
-                logging.info(f"[TG] Connected as @{getattr(me,'username',me.id)}")
+                logging.info(f"[TG] Connected as @{getattr(me, 'username', me.id)}")
                 await one_cycle(app)
                 interval = random.randint(*CHECK_INTERVAL)
                 logging.info(f"[WAIT] Next check in {interval} sec...")
