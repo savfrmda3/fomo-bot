@@ -6,14 +6,25 @@ import os
 import pickle
 import logging
 import json
+import sys
 from pyrogram import Client
 from pyrogram.errors import Unauthorized
 from playwright.async_api import async_playwright
 import portalsmp as pm
 import brotli
 
+# --- Force unbuffered stdout/stderr for cloud logging ---
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
 # --- Logging ---
-logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    force=True  # гарантирует, что все логи попадут в stdout
+)
+
+logging.info("[START] Bot is starting...")
 
 # --- ENV ---
 SESSION_STRING = os.environ.get("SESSION_STRING", "").strip()
@@ -31,15 +42,23 @@ FRESH_SEC        = int(os.environ.get("FRESH_SEC", 60))
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
 # --- Seen IDs ---
-SEEN_FILE = 'seen_ids.pickle'
+SEEN_FILE = '/tmp/seen_ids.pickle'  # /tmp доступен в Cloud Run/Railway
 seen_ids = set()
 if os.path.exists(SEEN_FILE):
-    with open(SEEN_FILE, 'rb') as f:
-        seen_ids = pickle.load(f)
+    try:
+        with open(SEEN_FILE, 'rb') as f:
+            seen_ids = pickle.load(f)
+        logging.info(f"[SEEN] Loaded {len(seen_ids)} seen IDs")
+    except Exception as e:
+        logging.warning(f"[SEEN] Failed to load seen_ids: {e}")
 
 def save_seen_ids():
-    with open(SEEN_FILE, 'wb') as f:
-        pickle.dump(seen_ids, f)
+    try:
+        with open(SEEN_FILE, 'wb') as f:
+            pickle.dump(seen_ids, f)
+        logging.info(f"[SEEN] Saved {len(seen_ids)} seen IDs")
+    except Exception as e:
+        logging.error(f"[SEEN] Failed to save seen_ids: {e}")
 
 # --- Pyrogram client ---
 def make_client(use_bot=False):
@@ -52,20 +71,23 @@ def make_client(use_bot=False):
 
 # --- Bypass Cloudflare ---
 async def bypass_cf():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        ctx = await browser.new_context(user_agent=(
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20A5346a TelegramBot/8.0"
-        ))
-        page = await ctx.new_page()
-        await page.goto("https://portals-market.com", wait_until="domcontentloaded")
-        await asyncio.sleep(random.uniform(3, 6))
-        for _ in range(random.randint(2, 5)):
-            await page.mouse.wheel(0, random.randint(300, 700))
-            await asyncio.sleep(random.uniform(0.3, 1.0))
-        await browser.close()
-        logging.info("[CF] Bypass done")
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            ctx = await browser.new_context(user_agent=(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20A5346a TelegramBot/8.0"
+            ))
+            page = await ctx.new_page()
+            await page.goto("https://portals-market.com", wait_until="domcontentloaded")
+            await asyncio.sleep(random.uniform(3, 6))
+            for _ in range(random.randint(2, 5)):
+                await page.mouse.wheel(0, random.randint(300, 700))
+                await asyncio.sleep(random.uniform(0.3, 1.0))
+            await browser.close()
+            logging.info("[CF] Bypass done")
+    except Exception as e:
+        logging.error(f"[CF] Bypass failed: {e}")
 
 # --- Filter fresh gifts ---
 def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
@@ -104,59 +126,58 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
 
 # --- One monitoring cycle ---
 async def one_cycle(app):
-    await bypass_cf()
-    token = await pm.update_auth(API_ID, API_HASH, SESSION_STRING)
-    all_gifts = []
+    try:
+        await bypass_cf()
+        token = await pm.update_auth(API_ID, API_HASH, SESSION_STRING)
+        all_gifts = []
 
-    for offset in range(0, MAX_GIFTS, BATCH_SIZE):
-        try:
-            batch = None
-            # --- Try original search ---
+        for offset in range(0, MAX_GIFTS, BATCH_SIZE):
             try:
-                batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
-            except Exception as e:
-                # --- Curl br error handler ---
-                if "Unrecognized content encoding type" in str(e):
-                    logging.warning(f"[SEARCH] Curl encoding error at offset {offset}, retrying with bypass...")
-                    await bypass_cf()
+                batch = None
+                try:
                     batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
-                else:
-                    raise
+                except Exception as e:
+                    if "Unrecognized content encoding type" in str(e):
+                        logging.warning(f"[SEARCH] Curl encoding error at offset {offset}, retrying with bypass...")
+                        await bypass_cf()
+                        batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+                    else:
+                        raise
 
-            # --- If response is bytes (br), decompress ---
-            if batch and isinstance(batch, bytes):
-                batch = brotli.decompress(batch)
-                batch = json.loads(batch)
+                if batch and isinstance(batch, bytes):
+                    batch = brotli.decompress(batch)
+                    batch = json.loads(batch)
 
-            if not batch:
+                if not batch:
+                    break
+
+                all_gifts.extend(batch)
+            except Exception as e:
+                logging.error(f"[SEARCH ERROR] at offset {offset}: {e}")
                 break
 
-            all_gifts.extend(batch)
+        logging.info(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
+        filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
 
-        except Exception as e:
-            logging.error(f"[SEARCH ERROR] at offset {offset}: {e}")
-            break
+        for g in filtered:
+            msg = (
+                f"🎁 <b>{g.get('name','Unknown')}</b>\n"
+                f"💰 Price: {g.get('price')} TON\n"
+                f"🏷 Floor: {g.get('floor_price')} TON\n"
+                f"💸 Drop: {g.get('drop_percent')}%\n"
+                f"🌑 BG: {g.get('backdrop')}\n"
+                f"🔗 <a href='{g.get('photo_url','')}'>Open</a>"
+            )
+            try:
+                await app.send_message(CHANNEL, msg, disable_web_page_preview=False)
+                logging.info(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
+            except Exception as e:
+                logging.error(f"[SEND ERROR] {e}")
+            await asyncio.sleep(random.uniform(0.5, 1.3))
 
-    logging.info(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
-    filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
-
-    for g in filtered:
-        msg = (
-            f"🎁 <b>{g.get('name','Unknown')}</b>\n"
-            f"💰 Price: {g.get('price')} TON\n"
-            f"🏷 Floor: {g.get('floor_price')} TON\n"
-            f"💸 Drop: {g.get('drop_percent')}%\n"
-            f"🌑 BG: {g.get('backdrop')}\n"
-            f"🔗 <a href='{g.get('photo_url','')}'>Open</a>"
-        )
-        try:
-            await app.send_message(CHANNEL, msg, disable_web_page_preview=False)
-            logging.info(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
-        except Exception as e:
-            logging.error(f"[SEND ERROR] {e}")
-        await asyncio.sleep(random.uniform(0.5, 1.3))
-
-    save_seen_ids()
+        save_seen_ids()
+    except Exception as e:
+        logging.error(f"[CYCLE ERROR] {e}")
 
 # --- Monitoring loop ---
 async def monitor_loop():
@@ -182,4 +203,7 @@ async def monitor_loop():
             await asyncio.sleep(30)
 
 if __name__ == "__main__":
-    asyncio.run(monitor_loop())
+    try:
+        asyncio.run(monitor_loop())
+    except Exception as e:
+        logging.critical(f"[FATAL] Bot crashed: {e}")
