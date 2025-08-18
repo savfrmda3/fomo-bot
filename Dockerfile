@@ -1,26 +1,33 @@
-# --- Базовый Python образ ---
-FROM python:3.12-slim
+FROM python:3.11-slim
 
-# --- Установка системных зависимостей для Playwright ---
-RUN apt-get update && apt-get install -y wget curl unzip && rm -rf /var/lib/apt/lists/*
+# --- Устанавливаем системные зависимости ---
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    make \
+    curl \
+    wget \
+    gnupg \
+    libssl-dev \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    zlib1g-dev \
+    libc-dev \
+    libjpeg-dev \
+    libpng-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# --- Рабочая директория ---
+# --- Устанавливаем зависимости Python ---
 WORKDIR /app
-
-# --- Копируем requirements и устанавливаем зависимости ---
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --- Устанавливаем Playwright и Chromium ---
-RUN pip install --no-cache-dir playwright
-RUN playwright install-deps chromium && playwright install chromium
+RUN playwright install --with-deps chromium
 
-# --- Копируем весь проект ---
+# --- Копируем исходники ---
 COPY . .
 
-# --- Переменные окружения ---
-ENV PYTHONUNBUFFERED=1
-
-# --- Запуск приложения ---
 CMD ["python", "main.py"]
