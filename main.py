@@ -3,10 +3,15 @@ import asyncio
 import random
 import time
 import os
+import pickle
+import logging
 from pyrogram import Client
 from pyrogram.errors import Unauthorized
 from playwright.async_api import async_playwright
 import portalsmp as pm
+
+# Настройка logging
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 # --- ENV ---
 SESSION_STRING = os.environ.get("SESSION_STRING", "").strip()
@@ -23,7 +28,16 @@ FRESH_SEC        = int(os.environ.get("FRESH_SEC", 60))
 
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
+# Персистентность seen_ids
+SEEN_FILE = 'seen_ids.pickle'
 seen_ids = set()
+if os.path.exists(SEEN_FILE):
+    with open(SEEN_FILE, 'rb') as f:
+        seen_ids = pickle.load(f)
+
+def save_seen_ids():
+    with open(SEEN_FILE, 'wb') as f:
+        pickle.dump(seen_ids, f)
 
 def make_client(use_bot=False):
     """Создаёт Pyrogram client: юзербот или BOT_TOKEN"""
@@ -58,7 +72,7 @@ async def bypass_cf():
             await page.mouse.wheel(0, random.randint(300, 700))
             await asyncio.sleep(random.uniform(0.3, 1.0))
         await browser.close()
-        print("[CF] Bypass done")
+        logging.info("[CF] Bypass done")
 
 def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
     out, now = [], time.time()
@@ -72,36 +86,43 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
         listed_ts = None
         try:
             listed_ts = float(listed_at)
-        except:
+        except ValueError:
             try:
                 listed_ts = time.mktime(time.strptime(str(listed_at).split(".")[0], "%Y-%m-%dT%H:%M:%S"))
-            except:
+            except ValueError:
+                logging.warning(f"[FILTER] Invalid listed_at: {listed_at}")
                 continue
         if listed_ts is None or now - listed_ts > fresh_sec:
             continue
         try:
             price = float(str(g.get("price", 0)).replace("~", "").strip())
             floor = float(str(g.get("floor_price", 0)).replace("~", "").strip())
-        except:
+        except ValueError:
+            logging.warning(f"[FILTER] Invalid price/floor: {g.get('price')} / {g.get('floor_price')}")
             continue
         drop_percent = 100 * (1 - price / floor) if floor > 0 else 0
         if drop_percent >= min_drop:
             g["drop_percent"] = round(drop_percent, 1)
             out.append(g)
             seen.add(gid)
-    print(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
+    logging.info(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
     return out
 
 async def one_cycle(app):
     await bypass_cf()
-    token = await pm.update_auth(API_ID, API_HASH)
+    # Используем модифицированную update_auth с SESSION_STRING
+    token = await pm.update_auth(API_ID, API_HASH, SESSION_STRING)
     all_gifts = []
     for offset in range(0, MAX_GIFTS, BATCH_SIZE):
-        batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
-        if not batch:
+        try:
+            batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+            if not batch:
+                break
+            all_gifts.extend(batch)
+        except Exception as e:
+            logging.error(f"[SEARCH ERROR] at offset {offset}: {e}")
             break
-        all_gifts.extend(batch)
-    print(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
+    logging.info(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
     filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
     for g in filtered:
         msg = (
@@ -114,10 +135,11 @@ async def one_cycle(app):
         )
         try:
             await app.send_message(CHANNEL, msg, disable_web_page_preview=False)
-            print(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
+            logging.info(f"[SEND] {g.get('name')} @ {g.get('price')} TON")
         except Exception as e:
-            print(f"[SEND ERROR] {e}")
+            logging.error(f"[SEND ERROR] {e}")
         await asyncio.sleep(random.uniform(0.5, 1.3))
+    save_seen_ids()  # Сохраняем seen_ids после цикла
 
 async def monitor_loop():
     use_bot = False
@@ -126,19 +148,19 @@ async def monitor_loop():
         try:
             async with cli as app:
                 me = await app.get_me()
-                print(f"[TG] Connected as @{getattr(me, 'username', me.id)}")
+                logging.info(f"[TG] Connected as @{getattr(me, 'username', me.id)}")
                 await one_cycle(app)
                 interval = random.randint(*CHECK_INTERVAL)
-                print(f"[WAIT] Next check in {interval} sec...")
+                logging.info(f"[WAIT] Next check in {interval} sec...")
                 await asyncio.sleep(interval)
         except Unauthorized as e:
-            print(f"[AUTH] {e}. Switching to BOT_TOKEN if available.")
+            logging.error(f"[AUTH] {e}. Switching to BOT_TOKEN if available.")
             if not BOT_TOKEN:
                 raise
-            use_bot = True  # далее используем бота
+            use_bot = True
             await asyncio.sleep(5)
         except Exception as e:
-            print(f"[ERROR] {e}, retrying in 30 sec...")
+            logging.error(f"[ERROR] {e}, retrying in 30 sec...")
             await asyncio.sleep(30)
 
 if __name__ == "__main__":
