@@ -5,12 +5,14 @@ import time
 import os
 import pickle
 import logging
+import json
 from pyrogram import Client
 from pyrogram.errors import Unauthorized
 from playwright.async_api import async_playwright
 import portalsmp as pm
+import brotli
 
-# Настройка logging
+# --- Logging ---
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 # --- ENV ---
@@ -28,7 +30,7 @@ FRESH_SEC        = int(os.environ.get("FRESH_SEC", 60))
 
 os.environ["PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS"] = "1"
 
-# Персистентность seen_ids
+# --- Seen IDs ---
 SEEN_FILE = 'seen_ids.pickle'
 seen_ids = set()
 if os.path.exists(SEEN_FILE):
@@ -39,25 +41,16 @@ def save_seen_ids():
     with open(SEEN_FILE, 'wb') as f:
         pickle.dump(seen_ids, f)
 
+# --- Pyrogram client ---
 def make_client(use_bot=False):
-    """Создаёт Pyrogram client: юзербот или BOT_TOKEN"""
     if not use_bot and SESSION_STRING and len(SESSION_STRING) > 100 and SESSION_STRING.startswith(("BA", "CA", "DA")):
-        return Client(
-            name="user_session",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            session_string=SESSION_STRING
-        )
+        return Client(name="user_session", api_id=API_ID, api_hash=API_HASH, session_string=SESSION_STRING)
     elif BOT_TOKEN:
-        return Client(
-            name="bot_session",
-            api_id=API_ID,
-            api_hash=API_HASH,
-            bot_token=BOT_TOKEN
-        )
+        return Client(name="bot_session", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     else:
         raise RuntimeError("Нет ни SESSION_STRING, ни BOT_TOKEN")
 
+# --- Bypass Cloudflare ---
 async def bypass_cf():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -74,6 +67,7 @@ async def bypass_cf():
         await browser.close()
         logging.info("[CF] Bypass done")
 
+# --- Filter fresh gifts ---
 def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
     out, now = [], time.time()
     for g in items:
@@ -108,22 +102,44 @@ def filter_fresh_gifts(items, min_drop, seen, fresh_sec=60):
     logging.info(f"[FILTER] {len(items)} gifts -> {len(out)} fresh gifts")
     return out
 
+# --- One monitoring cycle ---
 async def one_cycle(app):
     await bypass_cf()
-    # Используем модифицированную update_auth с SESSION_STRING
     token = await pm.update_auth(API_ID, API_HASH, SESSION_STRING)
     all_gifts = []
+
     for offset in range(0, MAX_GIFTS, BATCH_SIZE):
         try:
-            batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+            batch = None
+            # --- Try original search ---
+            try:
+                batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+            except Exception as e:
+                # --- Curl br error handler ---
+                if "Unrecognized content encoding type" in str(e):
+                    logging.warning(f"[SEARCH] Curl encoding error at offset {offset}, retrying with bypass...")
+                    await bypass_cf()
+                    batch = pm.search(sort="price_asc", limit=BATCH_SIZE, offset=offset, authData=token)
+                else:
+                    raise
+
+            # --- If response is bytes (br), decompress ---
+            if batch and isinstance(batch, bytes):
+                batch = brotli.decompress(batch)
+                batch = json.loads(batch)
+
             if not batch:
                 break
+
             all_gifts.extend(batch)
+
         except Exception as e:
             logging.error(f"[SEARCH ERROR] at offset {offset}: {e}")
             break
+
     logging.info(f"[SEARCH] Total pulled gifts: {len(all_gifts)}")
     filtered = filter_fresh_gifts(all_gifts, MIN_DROP_PERCENT, seen_ids, FRESH_SEC)
+
     for g in filtered:
         msg = (
             f"🎁 <b>{g.get('name','Unknown')}</b>\n"
@@ -139,8 +155,10 @@ async def one_cycle(app):
         except Exception as e:
             logging.error(f"[SEND ERROR] {e}")
         await asyncio.sleep(random.uniform(0.5, 1.3))
-    save_seen_ids()  # Сохраняем seen_ids после цикла
 
+    save_seen_ids()
+
+# --- Monitoring loop ---
 async def monitor_loop():
     use_bot = False
     while True:
