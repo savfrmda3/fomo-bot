@@ -3,6 +3,8 @@ tgcrypto==1.2.5
 playwright==1.43.0
 curl-cffi==0.6.2
 requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.2.1
 fake-useragent==1.5.1
 python-dotenv==1.0.0
 pydantic==2.7.1
